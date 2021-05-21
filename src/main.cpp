@@ -28,6 +28,9 @@ using Normals  = std::vector<vec3>;
 /* Map vertex index to normal index (for tiny_obj_loader) */
 using VertexNormalMapping = std::map<std::size_t, std::size_t>;
 
+/* Map an edge to a face index */
+using EdgeFaceMapping = std::map<Edge, std::size_t>;
+
 /* Any border vertex is referenced by at most 2 border edges. */
 using BorderVertices = std::map<std::size_t, std::pair<Edge, Edge>>;
 using ConnectedEdges = std::list<Edge>;
@@ -37,29 +40,23 @@ void flip(Edge &edge) { edge = {edge.second, edge.first}; }
 /* Get vertex id list such that every 3 consequent ids from the beginning
  * form a face.
  */
-Faces get_face_verts(std::vector<tinyobj::shape_t> const &shapes,
-                     VertexNormalMapping *normal_index_of = nullptr) {
-    Faces faces;
-    for (auto const &shape : shapes) {
-        std::size_t index_offset = 0;
-        for (std::size_t fi = 0; fi < shape.mesh.num_face_vertices.size();
-             ++fi) {
-            std::size_t nverts = shape.mesh.num_face_vertices[fi];
-            for (std::size_t v = 0; v < nverts; ++v) {
-                tinyobj::index_t idx = shape.mesh.indices[index_offset + v];
-                faces.push_back(idx.vertex_index);
-                if (normal_index_of) {
-                    (*normal_index_of)[idx.vertex_index] = idx.normal_index;
-                }
-            }
-            index_offset += nverts;
+Faces get_face_verts(tinyobj::shape_t const &shape,
+                     VertexNormalMapping &   normal_index_of) {
+    Faces       faces;
+    std::size_t index_offset = 0;
+    for (std::size_t fi = 0; fi < shape.mesh.num_face_vertices.size(); ++fi) {
+        std::size_t nverts = shape.mesh.num_face_vertices[fi];
+        for (std::size_t v = 0; v < nverts; ++v) {
+            tinyobj::index_t idx = shape.mesh.indices[index_offset + v];
+            faces.push_back(idx.vertex_index);
+            normal_index_of[idx.vertex_index] = idx.normal_index;
         }
+        index_offset += nverts;
     }
     return faces;
 }
 
-Vertices get_all_vertices(std::vector<tinyobj::shape_t> const &shapes,
-                          tinyobj::attrib_t const &            attrib) {
+Vertices get_all_vertices(tinyobj::attrib_t const &attrib) {
     /* Must be triangular mesh */
     Vertices vertices(attrib.vertices.size() / 3);
     auto     get_vertex_from_attrib = [&](std::size_t index) -> vec3 {
@@ -74,9 +71,8 @@ Vertices get_all_vertices(std::vector<tinyobj::shape_t> const &shapes,
     return vertices;
 }
 
-Normals get_all_normals(std::vector<tinyobj::shape_t> const &shapes,
-                        tinyobj::attrib_t const &            attrib,
-                        VertexNormalMapping normal_index_of) {
+Normals get_all_normals(tinyobj::attrib_t const &attrib,
+                        VertexNormalMapping      normal_index_of) {
     /* Must be triangular mesh */
     Normals normals(attrib.normals.size() / 3);
     auto    get_normal_from_attrib = [&](std::size_t index) -> vec3 {
@@ -91,7 +87,7 @@ Normals get_all_normals(std::vector<tinyobj::shape_t> const &shapes,
     return normals;
 }
 
-Edges get_border_edges(Faces const faces) {
+Edges get_border_edges(Faces const &faces, EdgeFaceMapping &face_index_of) {
     Edges border_edges;
 
     for (std::size_t i = 0; i < faces.size(); i += 3) {
@@ -102,6 +98,9 @@ Edges get_border_edges(Faces const faces) {
         Edge e0 = {v0, v1}, e0_i = {v1, v0};
         Edge e1 = {v1, v2}, e1_i = {v2, v1};
         Edge e2 = {v2, v0}, e2_i = {v0, v2};
+        face_index_of[e0] = face_index_of[e1] = face_index_of[e2] = i / 3;
+        face_index_of[e0_i] = face_index_of[e1_i] = face_index_of[e2_i] =
+            i / 3;
 
         if (border_edges.find(e0_i) == border_edges.end()) {
             // printf("inserted: (%lu, %lu)\n", e0.first, e0.second);
@@ -177,31 +176,44 @@ ConnectedEdges get_connected_border(Edges &border_edges) {
     return connected_border;
 }
 
-Faces close_hole(ConnectedEdges border_edges, tinyobj::attrib_t const &attrib,
-                 VertexNormalMapping normal_index_of) {
-    auto get_normal_from_attrib = [&](std::size_t index) -> vec3 {
-        flt x = attrib.normals[3 * normal_index_of[index] + 0];
-        flt y = attrib.normals[3 * normal_index_of[index] + 1];
-        flt z = attrib.normals[3 * normal_index_of[index] + 2];
-        return {x, y, z};
-    };
-    vec3 ref_normal = get_normal_from_attrib(border_edges.front().first);
-    /* First, check if normal values are the same across the whole border. */
-    for (Edge edge : border_edges) {
-        vec3 normal = get_normal_from_attrib(edge.second);
-        if (glm::sign(glm::dot(ref_normal, normal)) < 0) {
-            throw std::logic_error(
-                "Border with ununified normal is not handled");
-        }
-    }
-    printf("Sanity check for normal directions passed\n");
-
+Faces close_hole(ConnectedEdges border_edges, tinyobj::shape_t shape,
+                 tinyobj::attrib_t const &attrib,
+                 VertexNormalMapping      normal_index_of,
+                 EdgeFaceMapping          face_index_of) {
     auto get_vertex_from_attrib = [&](std::size_t index) -> vec3 {
         flt x = attrib.vertices[3 * index + 0];
         flt y = attrib.vertices[3 * index + 1];
         flt z = attrib.vertices[3 * index + 2];
         return {x, y, z};
     };
+    auto get_normal_of_edge = [&](Edge edge) -> vec3 {
+        std::size_t face_index   = face_index_of[edge];
+        std::size_t index_offset = 3 * face_index;
+        vec3        verts[3];
+        for (int i = 0; i < 3; ++i) {
+            tinyobj::index_t idx = shape.mesh.indices[index_offset + i];
+            verts[i]             = get_vertex_from_attrib(idx.vertex_index);
+        }
+        vec3 e0 = verts[1] - verts[0];
+        vec3 e1 = verts[2] - verts[1];
+        return glm::normalize(glm::cross(e0, e1));
+    };
+    // auto get_normal_from_attrib = [&](std::size_t index) -> vec3 {
+    // flt x = attrib.normals[3 * normal_index_of[index] + 0];
+    // flt y = attrib.normals[3 * normal_index_of[index] + 1];
+    // flt z = attrib.normals[3 * normal_index_of[index] + 2];
+    // return {x, y, z};
+    // };
+    vec3 ref_normal = get_normal_of_edge(border_edges.front());
+    /* First, check if normal values are the same across the whole border. */
+    for (Edge edge : border_edges) {
+        vec3 normal = get_normal_of_edge(edge);
+        if (glm::sign(glm::dot(ref_normal, normal)) < 0) {
+            throw std::invalid_argument("Sanity check failed: Border with "
+                                        "ununified normal is not handled");
+        }
+    }
+    printf("Sanity check for normal directions passed\n");
 
     Faces added_faces;
 
@@ -298,14 +310,13 @@ int main(int argc, char **argv) {
     }
 
     VertexNormalMapping normal_index_of;
-    Faces faces = get_face_verts(reader.GetShapes(), &normal_index_of);
+    Faces faces = get_face_verts(reader.GetShapes()[0], normal_index_of);
 
-    Vertices vertices =
-        get_all_vertices(reader.GetShapes(), reader.GetAttrib());
-    Normals normals = get_all_normals(reader.GetShapes(), reader.GetAttrib(),
-                                      normal_index_of);
+    Vertices vertices = get_all_vertices(reader.GetAttrib());
+    Normals  normals  = get_all_normals(reader.GetAttrib(), normal_index_of);
 
-    Edges border_edges = get_border_edges(faces);
+    EdgeFaceMapping face_index_of;
+    Edges           border_edges = get_border_edges(faces, face_index_of);
     printf("%lu edges on the border\n", border_edges.size());
 
     std::vector<ConnectedEdges> connected_border_edges;
@@ -319,8 +330,9 @@ int main(int argc, char **argv) {
 
     for (ConnectedEdges border_edges : connected_border_edges) {
         try {
-            Faces added_faces =
-                close_hole(border_edges, reader.GetAttrib(), normal_index_of);
+            Faces added_faces = close_hole(
+                border_edges, reader.GetShapes()[0], reader.GetAttrib(),
+                normal_index_of, face_index_of);
             printf("Added %lu faces\n", added_faces.size() / 3);
             export_added_faces("added.obj", added_faces);
             printf("Exported to added.obj\n");
