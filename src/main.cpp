@@ -1,8 +1,10 @@
 #include "tiny_obj_loader.h"
 
+#include <set>
+
 using Faces = std::vector<std::size_t>;
 using Edge  = std::pair<std::size_t, std::size_t>;
-using Edges = std::vector<Edge>;
+using Edges = std::set<Edge>;
 
 /* Get vertex id list such that every 3 consequent ids from the beginning
  * form a face.
@@ -16,11 +18,53 @@ Faces get_face_verts(std::vector<tinyobj::shape_t> const &shapes) {
             std::size_t nverts = shape.mesh.num_face_vertices[fi];
             for (std::size_t v = 0; v < nverts; ++v) {
                 tinyobj::index_t idx = shape.mesh.indices[index_offset + v];
-                faces.push_back(idx.vertex_index);
+                faces.push_back(nverts * idx.vertex_index);
             }
+            index_offset += nverts;
         }
     }
     return faces;
+}
+
+Edges get_border_edges(Faces const faces) {
+    Edges border_edges;
+
+    for (std::size_t i = 0; i < faces.size(); i += 3) {
+        std::size_t v0 = faces[i + 0];
+        std::size_t v1 = faces[i + 1];
+        std::size_t v2 = faces[i + 2];
+
+        Edge e0 = {v0, v1}, e0_i = {v1, v0};
+        Edge e1 = {v1, v2}, e1_i = {v2, v1};
+        Edge e2 = {v2, v0}, e2_i = {v0, v2};
+
+        if (border_edges.find(e0_i) == border_edges.end()) {
+            // printf("inserted: (%lu, %lu)\n", e0.first, e0.second);
+            border_edges.insert(e0);
+        } else {
+            border_edges.erase(e0_i);
+        }
+
+        if (border_edges.find(e1_i) == border_edges.end()) {
+            // printf("inserted: (%lu, %lu)\n", e1.first, e1.second);
+            border_edges.insert(e1);
+        } else {
+            border_edges.erase(e1_i);
+        }
+
+        if (border_edges.find(e2_i) == border_edges.end()) {
+            // printf("inserted: (%lu, %lu)\n", e2.first, e2.second);
+            border_edges.insert(e2);
+        } else {
+            border_edges.erase(e2_i);
+        }
+    }
+
+    for (auto e : border_edges) {
+        printf("%lu - %lu\n", e.first, e.second);
+    }
+
+    return border_edges;
 }
 
 int main(int argc, char **argv) {
@@ -40,6 +84,8 @@ int main(int argc, char **argv) {
 
     Faces faces = get_face_verts(reader.GetShapes());
     printf("%lu\n", faces.size());
+    Edges border_edges = get_border_edges(faces);
+    printf("%lu\n", border_edges.size());
 
     return 0;
 }
