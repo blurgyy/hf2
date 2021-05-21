@@ -37,8 +37,8 @@ add_executable(${target_name} "${sources}")
 # find_package(Eigen3)
 # include_directories(${EIGEN3_INCLUDE_DIRS})
 
-# # fmt
-# target_link_libraries(${target_name} fmt)
+# fmt
+target_link_libraries(${target_name} fmt)
 
 # # CGAL, build with `-DCGAL_HEADER_ONLY=OFF` to build shared objects for
 # # dynamic linking.
