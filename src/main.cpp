@@ -76,7 +76,8 @@ Edges get_border_edges(Faces const faces) {
     return border_edges;
 }
 
-ConnectedEdges get_connected_border(Edges const &border_edges) {
+/* Pass as reference to allow removal of recorded edges. */
+ConnectedEdges get_connected_border(Edges &border_edges) {
     ConnectedEdges connected_border;
 
     BorderVertices border_vertices;
@@ -89,12 +90,15 @@ ConnectedEdges get_connected_border(Edges const &border_edges) {
 
     connected_border.push_back(*border_edges.begin());
     Edge current_edge = connected_border.back();
-    Edge next_edge    = border_vertices[current_edge.second].first;
+    /* Remove edges that has been recorded */
+    border_edges.erase(current_edge);
+    Edge next_edge = border_vertices[current_edge.second].first;
     while (next_edge != connected_border.front()) {
         connected_border.push_back(next_edge);
-
         current_edge = connected_border.back();
-        next_edge    = border_vertices[current_edge.second].first;
+        /* Remove edges that has been recorded */
+        border_edges.erase(current_edge);
+        next_edge = border_vertices[current_edge.second].first;
     }
 
     /* Reverse border to get correct ordering of border edges. */
@@ -123,10 +127,13 @@ int main(int argc, char **argv) {
     printf("%lu\n", faces.size());
     Edges border_edges = get_border_edges(faces);
     printf("%lu\n", border_edges.size());
-    ConnectedEdges connected_border = get_connected_border(border_edges);
-    for (Edge const &edge : connected_border) {
-        printf("Edge: (%lu -> %lu)\n", edge.first, edge.second);
+
+    std::vector<ConnectedEdges> connected_border_edges;
+    while (border_edges.size()) {
+        printf("Border edges has size %lu\n", border_edges.size());
+        connected_border_edges.push_back(get_connected_border(border_edges));
     }
+    printf("Found %lu borders\n", connected_border_edges.size());
 
     return 0;
 }
