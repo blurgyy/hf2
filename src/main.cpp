@@ -40,8 +40,8 @@ void flip(Edge &edge) { edge = {edge.second, edge.first}; }
 /* Get vertex id list such that every 3 consequent ids from the beginning
  * form a face.
  */
-Faces get_face_verts(tinyobj::shape_t const &shape,
-                     VertexNormalMapping &   normal_index_of) {
+Faces get_all_faces(tinyobj::shape_t const &shape,
+                    VertexNormalMapping &   normal_index_of) {
     Faces       faces;
     std::size_t index_offset = 0;
     for (std::size_t fi = 0; fi < shape.mesh.num_face_vertices.size(); ++fi) {
@@ -260,7 +260,7 @@ Faces close_hole(ConnectedEdges border_edges, tinyobj::shape_t shape,
 }
 
 void export_mesh(fs::path path, Vertices vertices, Normals normals,
-                 Faces faces) {
+                 std::vector<Faces> groups_of_faces) {
     std::ofstream of;
     of.open(path);
     if (of.fail()) {
@@ -273,9 +273,11 @@ void export_mesh(fs::path path, Vertices vertices, Normals normals,
     for (vec3 normal : normals) {
         of << format("vn {} {} {}\n", normal.x, normal.y, normal.z);
     }
-    for (std::size_t i = 0; i < faces.size(); i += 3) {
-        of << format("f {} {} {}\n", faces[i + 0] + 1, faces[i + 1] + 1,
-                     faces[i + 2] + 1);
+    for (Faces faces : groups_of_faces) {
+        for (std::size_t i = 0; i < faces.size(); i += 3) {
+            of << format("f {} {} {}\n", faces[i + 0] + 1, faces[i + 1] + 1,
+                         faces[i + 2] + 1);
+        }
     }
     of.close();
 }
@@ -310,7 +312,7 @@ int main(int argc, char **argv) {
     }
 
     VertexNormalMapping normal_index_of;
-    Faces faces = get_face_verts(reader.GetShapes()[0], normal_index_of);
+    Faces faces = get_all_faces(reader.GetShapes()[0], normal_index_of);
 
     Vertices vertices = get_all_vertices(reader.GetAttrib());
     Normals  normals  = get_all_normals(reader.GetAttrib(), normal_index_of);
@@ -328,18 +330,20 @@ int main(int argc, char **argv) {
     }
     printf("Found %lu borders\n", connected_border_edges.size());
 
+    std::vector<Faces> groups_of_faces;
+    groups_of_faces.push_back(faces);
     for (ConnectedEdges border_edges : connected_border_edges) {
         try {
             Faces added_faces = close_hole(
                 border_edges, reader.GetShapes()[0], reader.GetAttrib(),
                 normal_index_of, face_index_of);
             printf("Added %lu faces\n", added_faces.size() / 3);
-            export_added_faces("added.obj", added_faces);
-            printf("Exported to added.obj\n");
+            groups_of_faces.push_back(added_faces);
         } catch (std::logic_error const &e) {
             printf("%s\n", e.what());
         }
     }
+    export_mesh("repaired.obj", vertices, normals, groups_of_faces);
 
     return 0;
 }
