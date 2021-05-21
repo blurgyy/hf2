@@ -1,10 +1,19 @@
 #include "tiny_obj_loader.h"
 
+#include <list>
+#include <map>
 #include <set>
 
 using Faces = std::vector<std::size_t>;
 using Edge  = std::pair<std::size_t, std::size_t>;
 using Edges = std::set<Edge>;
+
+/* Any border vertex is referenced by at most 2 border edges. */
+using BorderVertices = std::map<std::size_t, std::pair<Edge, Edge>>;
+
+using ConnectedEdges = std::list<Edge>;
+
+void flip(Edge &edge) { edge = {edge.second, edge.first}; }
 
 /* Get vertex id list such that every 3 consequent ids from the beginning
  * form a face.
@@ -67,6 +76,34 @@ Edges get_border_edges(Faces const faces) {
     return border_edges;
 }
 
+ConnectedEdges get_connected_border(Edges const &border_edges) {
+    ConnectedEdges connected_border;
+
+    BorderVertices border_vertices;
+    for (Edge const &edge : border_edges) {
+        std::size_t v0             = edge.first;
+        std::size_t v1             = edge.second;
+        border_vertices[v0].first  = edge;
+        border_vertices[v1].second = edge;
+    }
+
+    connected_border.push_back(*border_edges.begin());
+    Edge current_edge = connected_border.back();
+    Edge next_edge    = border_vertices[current_edge.second].first;
+    while (next_edge != connected_border.front()) {
+        connected_border.push_back(next_edge);
+
+        current_edge = connected_border.back();
+        next_edge    = border_vertices[current_edge.second].first;
+    }
+
+    /* Reverse border to get correct ordering of border edges. */
+    std::reverse(connected_border.begin(), connected_border.end());
+    std::for_each(connected_border.begin(), connected_border.end(), flip);
+
+    return connected_border;
+}
+
 int main(int argc, char **argv) {
     if (argc != 2) {
         printf("Usage: %s <model.obj>\n", argv[0]);
@@ -86,6 +123,10 @@ int main(int argc, char **argv) {
     printf("%lu\n", faces.size());
     Edges border_edges = get_border_edges(faces);
     printf("%lu\n", border_edges.size());
+    ConnectedEdges connected_border = get_connected_border(border_edges);
+    for (Edge const &edge : connected_border) {
+        printf("Edge: (%lu -> %lu)\n", edge.first, edge.second);
+    }
 
     return 0;
 }
