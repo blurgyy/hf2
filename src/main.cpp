@@ -267,13 +267,19 @@ void export_mesh(fs::path path, Vertices vertices, Normals normals,
         throw std::runtime_error(
             "Failed opening output file for added faces");
     }
+    of << "\n";
+    of << format("# {} vertices\n", vertices.size());
     for (vec3 vert : vertices) {
         of << format("v {} {} {}\n", vert.x, vert.y, vert.z);
     }
+    of << "\n";
+    of << format("# {} normals\n", vertices.size());
     for (vec3 normal : normals) {
         of << format("vn {} {} {}\n", normal.x, normal.y, normal.z);
     }
+    of << "\n";
     for (Faces faces : groups_of_faces) {
+        of << format("# Group of {} faces\n", faces.size());
         for (std::size_t i = 0; i < faces.size(); i += 3) {
             of << format("f {} {} {}\n", faces[i + 0] + 1, faces[i + 1] + 1,
                          faces[i + 2] + 1);
