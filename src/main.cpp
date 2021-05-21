@@ -146,12 +146,21 @@ ConnectedEdges get_connected_border(Edges &border_edges) {
 
     connected_border.push_back(*border_edges.begin());
     Edge current_edge = connected_border.back();
+    // printf("Pushing: %lu -> %lu\n", current_edge.first,
+    // current_edge.second); scanf("%d");
     /* Remove edges that has been recorded */
     border_edges.erase(current_edge);
     Edge next_edge = border_vertices[current_edge.second].first;
     while (next_edge != connected_border.front()) {
+        /* If next edge is invalid or not on border, return empty list */
+        if (border_edges.find(next_edge) == border_edges.end()) {
+            return ConnectedEdges();
+        }
         connected_border.push_back(next_edge);
         current_edge = connected_border.back();
+        // printf("Pushing: %lu -> %lu\n", current_edge.first,
+        // current_edge.second);
+        // scanf("%d");
         /* Remove edges that has been recorded */
         border_edges.erase(current_edge);
         next_edge = border_vertices[current_edge.second].first;
@@ -256,6 +265,7 @@ void export_mesh(fs::path path, Vertices vertices, Normals normals,
         of << format("f {} {} {}\n", faces[i + 0] + 1, faces[i + 1] + 1,
                      faces[i + 2] + 1);
     }
+    of.close();
 }
 
 void export_added_faces(fs::path path, Faces added_faces) {
@@ -269,6 +279,7 @@ void export_added_faces(fs::path path, Faces added_faces) {
         of << format("f {} {} {}\n", added_faces[i + 0] + 1,
                      added_faces[i + 1] + 1, added_faces[i + 2] + 1);
     }
+    of.close();
 }
 
 int main(int argc, char **argv) {
@@ -295,20 +306,27 @@ int main(int argc, char **argv) {
                                       normal_index_of);
 
     Edges border_edges = get_border_edges(faces);
+    printf("%lu edges on the border\n", border_edges.size());
 
     std::vector<ConnectedEdges> connected_border_edges;
     while (border_edges.size()) {
-        printf("Border edges has size %lu\n", border_edges.size());
-        connected_border_edges.push_back(get_connected_border(border_edges));
+        ConnectedEdges new_set = get_connected_border(border_edges);
+        if (new_set.size()) {
+            connected_border_edges.push_back(new_set);
+        }
     }
     printf("Found %lu borders\n", connected_border_edges.size());
 
     for (ConnectedEdges border_edges : connected_border_edges) {
-        Faces added_faces =
-            close_hole(border_edges, reader.GetAttrib(), normal_index_of);
-        printf("Added %lu faces\n", added_faces.size() / 3);
-        export_added_faces("added.obj", added_faces);
-        printf("Exported to added.obj");
+        try {
+            Faces added_faces =
+                close_hole(border_edges, reader.GetAttrib(), normal_index_of);
+            printf("Added %lu faces\n", added_faces.size() / 3);
+            export_added_faces("added.obj", added_faces);
+            printf("Exported to added.obj\n");
+        } catch (std::logic_error const &e) {
+            printf("%s\n", e.what());
+        }
     }
 
     return 0;
